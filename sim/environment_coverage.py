@@ -10,6 +10,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from sim.inspection_receipts import (
+    InspectionReceiptError,
+    assess_inspection_receipt,
+)
+
 
 RECEIPT_TYPE = "simulation_environment_coverage"
 COMPARISON_TYPE = "simulation_environment_coverage_comparison"
@@ -141,6 +146,7 @@ def observe_environment(
     *,
     inspected_paths: Iterable[str | os.PathLike[str]] = (),
     excluded_paths: Iterable[str | os.PathLike[str]] = DEFAULT_EXCLUDED_PATHS,
+    inspection_receipts: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Observe regular files without changing the environment.
 
@@ -155,36 +161,64 @@ def observe_environment(
 
     exclusions = _normalize_paths(excluded_paths, label="excluded path")
     inspected = _normalize_paths(inspected_paths, label="inspected path")
-    inspected_set = set(inspected)
+    if inspected:
+        raise EnvironmentCoverageError(
+            "inspected_paths cannot establish coverage; supply hash-bound "
+            "inspection_receipts"
+        )
 
     source_files, unsupported = _iter_environment_entries(root_path, exclusions)
     observed_paths = {
         path.relative_to(root_path).as_posix()
         for path in source_files
     }
-    unknown_inspected = sorted(inspected_set - observed_paths)
-    if unknown_inspected:
-        raise EnvironmentCoverageError(
-            "inspected path was not observed: " + ", ".join(unknown_inspected)
+    receipts_by_path: dict[str, tuple[dict[str, Any], str]] = {}
+    stale_receipts: list[str] = []
+    for supplied_receipt in inspection_receipts:
+        verified_receipt, state = assess_inspection_receipt(
+            root_path,
+            supplied_receipt,
         )
+        receipt_path = verified_receipt["path"]
+        if receipt_path not in observed_paths:
+            raise InspectionReceiptError(
+                f"receipt path was not observed: {receipt_path}"
+            )
+        if receipt_path in receipts_by_path:
+            raise InspectionReceiptError(
+                f"multiple inspection receipts supplied for path: {receipt_path}"
+            )
+        receipts_by_path[receipt_path] = (verified_receipt, state)
+        if state == "STALE":
+            stale_receipts.append(verified_receipt["receipt_hash"])
 
     files: list[dict[str, Any]] = []
     for path in source_files:
         relative = path.relative_to(root_path).as_posix()
         size, sha256 = _file_identity(path)
-        files.append(
-            {
-                "path": relative,
-                "size": size,
-                "sha256": sha256,
-                "inspection_status": (
-                    "INSPECTED" if relative in inspected_set else "UNINSPECTED"
-                ),
-            }
-        )
+        entry: dict[str, Any] = {
+            "path": relative,
+            "size": size,
+            "sha256": sha256,
+            "inspection_status": "UNINSPECTED",
+        }
+        receipt_state = receipts_by_path.get(relative)
+        if receipt_state is not None:
+            inspection_receipt, state = receipt_state
+            entry["inspection_receipt_hash"] = inspection_receipt["receipt_hash"]
+            if state == "STALE":
+                entry["inspection_status"] = "STALE"
+            elif inspection_receipt["complete_byte_coverage"]:
+                entry["inspection_status"] = "INSPECTED"
+            else:
+                entry["inspection_status"] = "PARTIAL"
+        files.append(entry)
     files.sort(key=lambda item: item["path"])
 
-    inspected_count = len(inspected_set)
+    inspected_count = sum(
+        entry["inspection_status"] == "INSPECTED"
+        for entry in files
+    )
     uninspected_count = len(files) - inspected_count
     body: dict[str, Any] = {
         "type": RECEIPT_TYPE,
@@ -196,7 +230,13 @@ def observe_environment(
         "uninspected_file_count": uninspected_count,
         "excluded_paths": exclusions,
         "unsupported_entries": unsupported,
-        "coverage_complete": uninspected_count == 0 and not unsupported,
+        "stale_inspection_receipts": sorted(stale_receipts),
+        "coverage_complete": (
+            uninspected_count == 0
+            and not unsupported
+            and not stale_receipts
+        ),
+        "semantic_understanding_claimed": False,
         "accepted": False,
         "truth_claimed": False,
         "write_authority": "NONE",
