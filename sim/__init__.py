@@ -10,10 +10,16 @@ from sim.inspection_receipts import (
     create_inspection_receipt,
     verify_inspection_receipt,
 )
+from sim.environment_monitor import (
+    MonitorError,
+    build_monitor_packet,
+)
 
 __all__ = [
     "EnvironmentCoverageError",
     "InspectionReceiptError",
+    "MonitorError",
+    "build_monitor_packet",
     "compare_environment_receipts",
     "create_inspection_receipt",
     "observe_environment",
