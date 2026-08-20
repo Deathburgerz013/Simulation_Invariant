@@ -10,9 +10,9 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from sim.inspection_receipts import (
-    InspectionReceiptError,
-    assess_inspection_receipt,
+from sim.presentation_receipts import (
+    PresentationReceiptError,
+    assess_presentation_receipt,
 )
 
 
@@ -144,14 +144,14 @@ def _iter_environment_entries(
 def observe_environment(
     root: str | os.PathLike[str],
     *,
-    inspected_paths: Iterable[str | os.PathLike[str]] = (),
+    presented_paths: Iterable[str | os.PathLike[str]] = (),
     excluded_paths: Iterable[str | os.PathLike[str]] = DEFAULT_EXCLUDED_PATHS,
-    inspection_receipts: Iterable[Mapping[str, Any]] = (),
+    presentation_receipts: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Observe regular files without changing the environment.
 
-    Byte observation does not imply semantic inspection. A caller must name
-    every semantically inspected path explicitly.
+    Byte observation does not imply semantic inspection. Only hash-bound
+    presentation receipts establish which current bytes were emitted.
     """
     root_path = Path(root)
     if not root_path.exists() or not root_path.is_dir():
@@ -160,11 +160,11 @@ def observe_environment(
         raise EnvironmentCoverageError("root must not be a symbolic link")
 
     exclusions = _normalize_paths(excluded_paths, label="excluded path")
-    inspected = _normalize_paths(inspected_paths, label="inspected path")
-    if inspected:
+    presented = _normalize_paths(presented_paths, label="presented path")
+    if presented:
         raise EnvironmentCoverageError(
-            "inspected_paths cannot establish coverage; supply hash-bound "
-            "inspection_receipts"
+            "presented_paths cannot establish coverage; supply hash-bound "
+            "presentation_receipts"
         )
 
     source_files, unsupported = _iter_environment_entries(root_path, exclusions)
@@ -174,19 +174,19 @@ def observe_environment(
     }
     receipts_by_path: dict[str, tuple[dict[str, Any], str]] = {}
     stale_receipts: list[str] = []
-    for supplied_receipt in inspection_receipts:
-        verified_receipt, state = assess_inspection_receipt(
+    for supplied_receipt in presentation_receipts:
+        verified_receipt, state = assess_presentation_receipt(
             root_path,
             supplied_receipt,
         )
         receipt_path = verified_receipt["path"]
         if receipt_path not in observed_paths:
-            raise InspectionReceiptError(
+            raise PresentationReceiptError(
                 f"receipt path was not observed: {receipt_path}"
             )
         if receipt_path in receipts_by_path:
-            raise InspectionReceiptError(
-                f"multiple inspection receipts supplied for path: {receipt_path}"
+            raise PresentationReceiptError(
+                f"multiple presentation receipts supplied for path: {receipt_path}"
             )
         receipts_by_path[receipt_path] = (verified_receipt, state)
         if state == "STALE":
@@ -200,42 +200,43 @@ def observe_environment(
             "path": relative,
             "size": size,
             "sha256": sha256,
-            "inspection_status": "UNINSPECTED",
+            "presentation_status": "UNPRESENTED",
         }
         receipt_state = receipts_by_path.get(relative)
         if receipt_state is not None:
-            inspection_receipt, state = receipt_state
-            entry["inspection_receipt_hash"] = inspection_receipt["receipt_hash"]
+            presentation_receipt, state = receipt_state
+            entry["presentation_receipt_hash"] = presentation_receipt["receipt_hash"]
             if state == "STALE":
-                entry["inspection_status"] = "STALE"
-            elif inspection_receipt["complete_byte_coverage"]:
-                entry["inspection_status"] = "INSPECTED"
+                entry["presentation_status"] = "STALE"
+            elif presentation_receipt["complete_byte_presentation"]:
+                entry["presentation_status"] = "PRESENTED"
             else:
-                entry["inspection_status"] = "PARTIAL"
+                entry["presentation_status"] = "PARTIAL"
         files.append(entry)
     files.sort(key=lambda item: item["path"])
 
-    inspected_count = sum(
-        entry["inspection_status"] == "INSPECTED"
+    presented_count = sum(
+        entry["presentation_status"] == "PRESENTED"
         for entry in files
     )
-    uninspected_count = len(files) - inspected_count
+    unpresented_count = len(files) - presented_count
     body: dict[str, Any] = {
         "type": RECEIPT_TYPE,
         "version": FORMAT_VERSION,
         "root": ".",
         "files": files,
         "observed_file_count": len(files),
-        "inspected_file_count": inspected_count,
-        "uninspected_file_count": uninspected_count,
+        "presented_file_count": presented_count,
+        "unpresented_file_count": unpresented_count,
         "excluded_paths": exclusions,
         "unsupported_entries": unsupported,
-        "stale_inspection_receipts": sorted(stale_receipts),
-        "coverage_complete": (
-            uninspected_count == 0
+        "stale_presentation_receipts": sorted(stale_receipts),
+        "byte_presentation_complete": (
+            unpresented_count == 0
             and not unsupported
             and not stale_receipts
         ),
+        "semantic_inspection_claimed": False,
         "semantic_understanding_claimed": False,
         "accepted": False,
         "truth_claimed": False,

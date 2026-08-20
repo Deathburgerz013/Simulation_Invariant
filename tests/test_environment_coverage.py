@@ -9,7 +9,7 @@ from sim.environment_coverage import (
     compare_environment_receipts,
     observe_environment,
 )
-from sim.inspection_receipts import create_inspection_receipt
+from sim.presentation_receipts import create_presentation_receipt
 
 
 def digest(data: bytes) -> str:
@@ -30,14 +30,14 @@ def build_environment(root: Path) -> None:
     (root / "asset.bin").write_bytes(b"\x00\x01\xff")
 
 
-def inspect_whole_file(root: Path, relative: str) -> dict:
+def present_whole_file(root: Path, relative: str) -> dict:
     size = (root / Path(relative)).stat().st_size
     ranges = [] if size == 0 else [(0, size)]
-    return create_inspection_receipt(
+    return create_presentation_receipt(
         root,
         relative,
         method="bounded-byte-review-v1",
-        covered_ranges=ranges,
+        presented_ranges=ranges,
     )
 
 
@@ -54,9 +54,9 @@ def test_observation_is_deterministic_and_bounded(tmp_path):
     assert first["version"] == 1
     assert first["root"] == "."
     assert first["observed_file_count"] == 3
-    assert first["inspected_file_count"] == 0
-    assert first["uninspected_file_count"] == 3
-    assert first["coverage_complete"] is False
+    assert first["presented_file_count"] == 0
+    assert first["unpresented_file_count"] == 3
+    assert first["byte_presentation_complete"] is False
     assert first["accepted"] is False
     assert first["truth_claimed"] is False
     assert first["write_authority"] == "NONE"
@@ -80,30 +80,30 @@ def test_observation_hashes_binary_files_without_decoding(tmp_path):
         "path": "asset.bin",
         "size": 3,
         "sha256": digest(b"\x00\x01\xff"),
-        "inspection_status": "UNINSPECTED",
+        "presentation_status": "UNPRESENTED",
     }
 
 
-def test_inspection_is_explicit_and_does_not_follow_from_observation(tmp_path):
+def test_presentation_is_explicit_and_does_not_follow_from_observation(tmp_path):
     root = tmp_path / "environment"
     root.mkdir()
     build_environment(root)
 
     receipt = observe_environment(
         root,
-        inspection_receipts=[
-            inspect_whole_file(root, "docs/design.md"),
-            inspect_whole_file(root, "src/engine.py"),
+        presentation_receipts=[
+            present_whole_file(root, "docs/design.md"),
+            present_whole_file(root, "src/engine.py"),
         ],
     )
     files = {entry["path"]: entry for entry in receipt["files"]}
 
-    assert files["asset.bin"]["inspection_status"] == "UNINSPECTED"
-    assert files["docs/design.md"]["inspection_status"] == "INSPECTED"
-    assert files["src/engine.py"]["inspection_status"] == "INSPECTED"
-    assert receipt["inspected_file_count"] == 2
-    assert receipt["uninspected_file_count"] == 1
-    assert receipt["coverage_complete"] is False
+    assert files["asset.bin"]["presentation_status"] == "UNPRESENTED"
+    assert files["docs/design.md"]["presentation_status"] == "PRESENTED"
+    assert files["src/engine.py"]["presentation_status"] == "PRESENTED"
+    assert receipt["presented_file_count"] == 2
+    assert receipt["unpresented_file_count"] == 1
+    assert receipt["byte_presentation_complete"] is False
 
 
 def test_complete_coverage_requires_a_receipt_for_every_observed_file(
@@ -115,16 +115,16 @@ def test_complete_coverage_requires_a_receipt_for_every_observed_file(
 
     receipt = observe_environment(
         root,
-        inspection_receipts=[
-            inspect_whole_file(root, "asset.bin"),
-            inspect_whole_file(root, "docs/design.md"),
-            inspect_whole_file(root, "src/engine.py"),
+        presentation_receipts=[
+            present_whole_file(root, "asset.bin"),
+            present_whole_file(root, "docs/design.md"),
+            present_whole_file(root, "src/engine.py"),
         ],
     )
 
-    assert receipt["coverage_complete"] is True
-    assert receipt["inspected_file_count"] == 3
-    assert receipt["uninspected_file_count"] == 0
+    assert receipt["byte_presentation_complete"] is True
+    assert receipt["presented_file_count"] == 3
+    assert receipt["unpresented_file_count"] == 0
     assert receipt["accepted"] is False
     assert receipt["write_authority"] == "NONE"
 
@@ -149,7 +149,7 @@ def test_exclusions_are_visible_in_the_receipt(tmp_path):
         "docs/design.md",
         "src/engine.py",
     ]
-    assert receipt["coverage_complete"] is False
+    assert receipt["byte_presentation_complete"] is False
 
 
 def test_receipt_identity_covers_the_bounded_body(tmp_path):
@@ -215,16 +215,16 @@ def test_comparison_of_same_receipt_has_no_change(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "inspected_path",
+    "presented_path",
     ["missing.txt", "../outside.txt", "/absolute.txt", "src/../asset.bin"],
 )
-def test_invalid_inspected_paths_are_rejected(tmp_path, inspected_path):
+def test_invalid_presented_paths_are_rejected(tmp_path, presented_path):
     root = tmp_path / "environment"
     root.mkdir()
     build_environment(root)
 
     with pytest.raises(EnvironmentCoverageError):
-        observe_environment(root, inspected_paths=[inspected_path])
+        observe_environment(root, presented_paths=[presented_path])
 
 
 def test_missing_or_non_directory_roots_are_rejected(tmp_path):

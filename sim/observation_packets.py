@@ -14,10 +14,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from sim.inspection_receipts import (
-    InspectionReceiptError,
-    create_inspection_receipt,
-    verify_inspection_receipt,
+from sim.presentation_receipts import (
+    PresentationReceiptError,
+    create_presentation_receipt,
+    verify_presentation_receipt,
 )
 
 
@@ -106,8 +106,8 @@ def _prior_receipt(
     if prior_receipt is None:
         return None
     try:
-        verified = verify_inspection_receipt(root, prior_receipt)
-    except InspectionReceiptError as exc:
+        verified = verify_presentation_receipt(root, prior_receipt)
+    except PresentationReceiptError as exc:
         raise ObservationPacketError(str(exc)) from exc
     if verified["path"] != relative:
         raise ObservationPacketError("prior receipt must bind the same source path")
@@ -119,7 +119,7 @@ def _range_pairs(receipt: Mapping[str, Any] | None) -> list[tuple[int, int]]:
         return []
     return [
         (entry["start"], entry["end"])
-        for entry in receipt["covered_ranges"]
+        for entry in receipt["presented_ranges"]
     ]
 
 
@@ -136,7 +136,7 @@ def build_observation_packet(
     prior_receipt: Mapping[str, Any] | None = None,
     method: str = DEFAULT_METHOD,
 ) -> dict[str, Any]:
-    """Present one exact bounded range and accumulate current byte coverage."""
+    """Present one exact bounded range and accumulate presentation evidence."""
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ObservationPacketError("max_bytes must be a positive integer")
     if start is not None and type(start) is not int:
@@ -154,7 +154,7 @@ def build_observation_packet(
         if start not in {None, 0}:
             raise ObservationPacketError("start must be zero for an empty source")
         if prior_ranges:
-            raise ObservationPacketError("empty source cannot have covered ranges")
+            raise ObservationPacketError("empty source cannot have presented ranges")
         selected_start = 0
         selected_end = 0
         presented_range: dict[str, int] | None = None
@@ -165,9 +165,9 @@ def build_observation_packet(
             if prior is None:
                 selected_start = 0
             else:
-                uncovered = prior["uncovered_ranges"]
+                uncovered = prior["unpresented_ranges"]
                 if not uncovered:
-                    raise ObservationPacketError("prior receipt already has complete coverage")
+                    raise ObservationPacketError("prior receipt already has complete presentation")
                 selected_start = uncovered[0]["start"]
         else:
             selected_start = start
@@ -175,7 +175,7 @@ def build_observation_packet(
             raise ObservationPacketError("start must identify a byte inside the source")
         selected_end = min(source_size, selected_start + max_bytes)
         if _overlaps(selected_start, selected_end, prior_ranges):
-            raise ObservationPacketError("presented range would overlap prior coverage")
+            raise ObservationPacketError("presented range would overlap prior presentation")
         presented_range = {"start": selected_start, "end": selected_end}
         content = _read_range(source, selected_start, selected_end)
         combined_ranges = sorted(
@@ -185,18 +185,18 @@ def build_observation_packet(
 
     receipt_method = prior["method"] if prior is not None else method.strip()
     try:
-        receipt = create_inspection_receipt(
+        receipt = create_presentation_receipt(
             root_path,
             relative,
             method=receipt_method,
-            covered_ranges=combined_ranges,
+            presented_ranges=combined_ranges,
         )
-    except InspectionReceiptError as exc:
+    except PresentationReceiptError as exc:
         raise ObservationPacketError(str(exc)) from exc
 
     next_offset = (
-        receipt["uncovered_ranges"][0]["start"]
-        if receipt["uncovered_ranges"]
+        receipt["unpresented_ranges"][0]["start"]
+        if receipt["unpresented_ranges"]
         else None
     )
     body: dict[str, Any] = {
@@ -211,7 +211,8 @@ def build_observation_packet(
         "content_sha256": hashlib.sha256(content).hexdigest(),
         "utf8_text": _utf8_text(content),
         "next_offset": next_offset,
-        "inspection_receipt": receipt,
+        "presentation_receipt": receipt,
+        "semantic_inspection_claimed": False,
         "semantic_understanding_claimed": False,
         "accepted": False,
         "truth_claimed": False,
@@ -241,12 +242,12 @@ def verify_observation_packet(
         raise ObservationPacketError("observation packet path is invalid")
     root_path, source = _source(root, relative)
 
-    receipt_value = candidate.get("inspection_receipt")
+    receipt_value = candidate.get("presentation_receipt")
     if not isinstance(receipt_value, Mapping):
-        raise ObservationPacketError("inspection receipt is missing")
+        raise ObservationPacketError("presentation receipt is missing")
     try:
-        receipt = verify_inspection_receipt(root_path, receipt_value)
-    except InspectionReceiptError as exc:
+        receipt = verify_presentation_receipt(root_path, receipt_value)
+    except PresentationReceiptError as exc:
         raise ObservationPacketError(str(exc)) from exc
     if (
         receipt["path"] != relative
@@ -280,7 +281,7 @@ def verify_observation_packet(
         expected = _read_range(source, start, end)
         matching = [
             entry
-            for entry in receipt["covered_ranges"]
+            for entry in receipt["presented_ranges"]
             if entry["start"] == start and entry["end"] == end
         ]
         if len(matching) != 1:
@@ -290,13 +291,18 @@ def verify_observation_packet(
     if candidate.get("utf8_text") != _utf8_text(content):
         raise ObservationPacketError("UTF-8 preview mismatch")
     expected_next = (
-        receipt["uncovered_ranges"][0]["start"]
-        if receipt["uncovered_ranges"]
+        receipt["unpresented_ranges"][0]["start"]
+        if receipt["unpresented_ranges"]
         else None
     )
     if candidate.get("next_offset") != expected_next:
         raise ObservationPacketError("next offset mismatch")
-    for field in ("semantic_understanding_claimed", "accepted", "truth_claimed"):
+    for field in (
+        "semantic_inspection_claimed",
+        "semantic_understanding_claimed",
+        "accepted",
+        "truth_claimed",
+    ):
         if candidate.get(field) is not False:
             raise ObservationPacketError(f"{field} must remain false")
     for field in ("write_authority", "execution_authority"):
@@ -316,7 +322,7 @@ def _load_prior(path: str | os.PathLike[str], root: str, source_path: str) -> di
     if not isinstance(value, dict):
         raise ObservationPacketError("prior evidence must contain a JSON object")
     if value.get("type") == OBSERVATION_TYPE:
-        return verify_observation_packet(root, value)["inspection_receipt"]
+        return verify_observation_packet(root, value)["presentation_receipt"]
     return value
 
 
@@ -338,6 +344,8 @@ def _error_packet(error: Exception) -> dict[str, Any]:
         "type": "simulation_observation_error",
         "version": OBSERVATION_VERSION,
         "error": str(error),
+        "semantic_inspection_claimed": False,
+        "semantic_understanding_claimed": False,
         "accepted": False,
         "truth_claimed": False,
         "write_authority": "NONE",
@@ -360,7 +368,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_bytes=args.max_bytes,
             prior_receipt=prior,
         )
-    except (ObservationPacketError, InspectionReceiptError, TypeError) as exc:
+    except (ObservationPacketError, PresentationReceiptError, TypeError) as exc:
         print(json.dumps(_error_packet(exc), sort_keys=True), file=sys.stderr)
         return 2
     print(json.dumps(packet, sort_keys=True, indent=2, ensure_ascii=False))

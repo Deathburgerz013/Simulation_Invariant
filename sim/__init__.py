@@ -1,14 +1,14 @@
-"""Bounded, inspectable AI environment primitives."""
+"""Bounded, verifiable AI environment presentation primitives."""
 
 from sim.environment_coverage import (
     EnvironmentCoverageError,
     compare_environment_receipts,
     observe_environment,
 )
-from sim.inspection_receipts import (
-    InspectionReceiptError,
-    create_inspection_receipt,
-    verify_inspection_receipt,
+from sim.presentation_receipts import (
+    PresentationReceiptError,
+    create_presentation_receipt,
+    verify_presentation_receipt,
 )
 from sim.environment_monitor import (
     MonitorError,
@@ -22,14 +22,14 @@ from sim.observation_packets import (
 
 __all__ = [
     "EnvironmentCoverageError",
-    "InspectionReceiptError",
+    "PresentationReceiptError",
     "MonitorError",
     "ObservationPacketError",
     "build_observation_packet",
     "build_monitor_packet",
     "compare_environment_receipts",
-    "create_inspection_receipt",
+    "create_presentation_receipt",
     "observe_environment",
-    "verify_inspection_receipt",
+    "verify_presentation_receipt",
     "verify_observation_packet",
 ]

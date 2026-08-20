@@ -12,7 +12,7 @@ from sim.environment_monitor import (
     build_monitor_packet,
     main as monitor_main,
 )
-from sim.inspection_receipts import create_inspection_receipt
+from sim.presentation_receipts import create_presentation_receipt
 
 
 def canonical_hash(value: dict) -> str:
@@ -30,12 +30,12 @@ def build_environment(root: Path) -> None:
     (root / "b.txt").write_bytes(b"beta")
 
 
-def inspect(root: Path, path: str, end: int) -> dict:
-    return create_inspection_receipt(
+def present(root: Path, path: str, end: int) -> dict:
+    return create_presentation_receipt(
         root,
         path,
         method="bounded-byte-review-v1",
-        covered_ranges=[] if end == 0 else [(0, end)],
+        presented_ranges=[] if end == 0 else [(0, end)],
     )
 
 
@@ -57,14 +57,14 @@ def test_monitor_exposes_unseen_state_and_next_boundary(tmp_path):
     assert packet["type"] == MONITOR_TYPE
     assert packet["version"] == 1
     assert packet["coverage"]["observed_file_count"] == 2
-    assert packet["coverage"]["coverage_complete"] is False
+    assert packet["coverage"]["byte_presentation_complete"] is False
     assert packet["unresolved_boundaries"] == [
-        {"path": "a.txt", "reason": "UNINSPECTED"},
-        {"path": "b.txt", "reason": "UNINSPECTED"},
+        {"path": "a.txt", "reason": "UNPRESENTED"},
+        {"path": "b.txt", "reason": "UNPRESENTED"},
     ]
     assert packet["next_boundary"] == {
         "path": "a.txt",
-        "reason": "UNINSPECTED",
+        "reason": "UNPRESENTED",
     }
     assert packet["comparison"] is None
     assert packet["semantic_understanding_claimed"] is False
@@ -91,44 +91,44 @@ def test_monitor_is_deterministic_and_read_only(tmp_path):
     assert snapshot(root) == before
 
 
-def test_monitor_uses_current_complete_inspection_receipts(tmp_path):
+def test_monitor_uses_current_complete_presentation_receipts(tmp_path):
     root = tmp_path / "environment"
     root.mkdir()
     build_environment(root)
-    receipts = [inspect(root, "a.txt", 5), inspect(root, "b.txt", 4)]
+    receipts = [present(root, "a.txt", 5), present(root, "b.txt", 4)]
 
-    packet = build_monitor_packet(root, inspection_receipts=receipts)
+    packet = build_monitor_packet(root, presentation_receipts=receipts)
 
-    assert packet["coverage"]["coverage_complete"] is True
+    assert packet["coverage"]["byte_presentation_complete"] is True
     assert packet["unresolved_boundaries"] == []
     assert packet["next_boundary"] is None
     assert packet["semantic_understanding_claimed"] is False
 
 
-def test_monitor_prioritizes_stale_then_partial_then_uninspected(tmp_path):
+def test_monitor_prioritizes_stale_then_partial_then_unpresented(tmp_path):
     root = tmp_path / "environment"
     root.mkdir()
     (root / "a-stale.txt").write_bytes(b"stale")
     (root / "b-partial.txt").write_bytes(b"partial")
     (root / "c-unseen.txt").write_bytes(b"unseen")
-    stale = inspect(root, "a-stale.txt", 5)
-    partial = create_inspection_receipt(
+    stale = present(root, "a-stale.txt", 5)
+    partial = create_presentation_receipt(
         root,
         "b-partial.txt",
         method="bounded-byte-review-v1",
-        covered_ranges=[(0, 3)],
+        presented_ranges=[(0, 3)],
     )
     (root / "a-stale.txt").write_bytes(b"changed")
 
     packet = build_monitor_packet(
         root,
-        inspection_receipts=[partial, stale],
+        presentation_receipts=[partial, stale],
     )
 
     assert packet["unresolved_boundaries"] == [
         {"path": "a-stale.txt", "reason": "STALE"},
         {"path": "b-partial.txt", "reason": "PARTIAL"},
-        {"path": "c-unseen.txt", "reason": "UNINSPECTED"},
+        {"path": "c-unseen.txt", "reason": "UNPRESENTED"},
     ]
     assert packet["next_boundary"] == {
         "path": "a-stale.txt",
@@ -199,7 +199,7 @@ def test_cli_loads_receipts_and_baseline_from_outside_environment(
     root.mkdir()
     build_environment(root)
     baseline = observe_environment(root)
-    receipt = inspect(root, "a.txt", 5)
+    receipt = present(root, "a.txt", 5)
     baseline_path = tmp_path / "baseline.json"
     receipt_path = tmp_path / "receipt.json"
     baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
@@ -210,18 +210,18 @@ def test_cli_loads_receipts_and_baseline_from_outside_environment(
             str(root),
             "--baseline",
             str(baseline_path),
-            "--inspection-receipt",
+            "--presentation-receipt",
             str(receipt_path),
         ]
     )
 
     packet = json.loads(capsys.readouterr().out)
     assert result == 0
-    assert packet["coverage"]["inspected_file_count"] == 1
+    assert packet["coverage"]["presented_file_count"] == 1
     assert packet["comparison"]["changed"] is False
     assert packet["next_boundary"] == {
         "path": "b.txt",
-        "reason": "UNINSPECTED",
+        "reason": "UNPRESENTED",
     }
 
 

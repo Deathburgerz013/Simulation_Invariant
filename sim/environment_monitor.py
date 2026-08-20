@@ -17,7 +17,7 @@ from sim.environment_coverage import (
     compare_environment_receipts,
     observe_environment,
 )
-from sim.inspection_receipts import InspectionReceiptError
+from sim.presentation_receipts import PresentationReceiptError
 
 
 MONITOR_TYPE = "simulation_environment_monitor"
@@ -26,7 +26,7 @@ MONITOR_VERSION = 1
 _STATUS_PRIORITY = {
     "STALE": 0,
     "PARTIAL": 1,
-    "UNINSPECTED": 2,
+    "UNPRESENTED": 2,
     "UNSUPPORTED": 3,
 }
 
@@ -51,8 +51,8 @@ def _identity(value: Mapping[str, Any]) -> str:
 def _unresolved_boundaries(coverage: Mapping[str, Any]) -> list[dict[str, str]]:
     boundaries: list[dict[str, str]] = []
     for entry in coverage["files"]:
-        status = entry["inspection_status"]
-        if status != "INSPECTED":
+        status = entry["presentation_status"]
+        if status != "PRESENTED":
             boundaries.append({"path": entry["path"], "reason": status})
     for entry in coverage["unsupported_entries"]:
         boundaries.append(
@@ -76,7 +76,7 @@ def _unresolved_boundaries(coverage: Mapping[str, Any]) -> list[dict[str, str]]:
 def build_monitor_packet(
     root: str | os.PathLike[str],
     *,
-    inspection_receipts: Iterable[Mapping[str, Any]] = (),
+    presentation_receipts: Iterable[Mapping[str, Any]] = (),
     baseline: Mapping[str, Any] | None = None,
     excluded_paths: Iterable[str | os.PathLike[str]] = DEFAULT_EXCLUDED_PATHS,
 ) -> dict[str, Any]:
@@ -84,7 +84,7 @@ def build_monitor_packet(
     coverage = observe_environment(
         root,
         excluded_paths=excluded_paths,
-        inspection_receipts=inspection_receipts,
+        presentation_receipts=presentation_receipts,
     )
     comparison: dict[str, Any] | None = None
     if baseline is not None:
@@ -103,6 +103,7 @@ def build_monitor_packet(
         "comparison": comparison,
         "unresolved_boundaries": unresolved,
         "next_boundary": unresolved[0] if unresolved else None,
+        "semantic_inspection_claimed": False,
         "semantic_understanding_claimed": False,
         "accepted": False,
         "truth_claimed": False,
@@ -130,6 +131,8 @@ def _error_packet(error: Exception) -> dict[str, Any]:
         "type": "simulation_monitor_error",
         "version": MONITOR_VERSION,
         "error": str(error),
+        "semantic_inspection_claimed": False,
+        "semantic_understanding_claimed": False,
         "accepted": False,
         "truth_claimed": False,
         "write_authority": "NONE",
@@ -144,11 +147,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("root", help="Environment directory to observe")
     parser.add_argument(
-        "--inspection-receipt",
+        "--presentation-receipt",
         action="append",
         default=[],
         metavar="PATH",
-        help="Hash-bound inspection receipt JSON; may be repeated",
+        help="Hash-bound presentation receipt JSON; may be repeated",
     )
     parser.add_argument(
         "--baseline",
@@ -170,8 +173,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
         receipts = [
-            _load_json_mapping(path, label="inspection receipt")
-            for path in args.inspection_receipt
+            _load_json_mapping(path, label="presentation receipt")
+            for path in args.presentation_receipt
         ]
         baseline = (
             _load_json_mapping(args.baseline, label="baseline")
@@ -185,13 +188,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         packet = build_monitor_packet(
             args.root,
-            inspection_receipts=receipts,
+            presentation_receipts=receipts,
             baseline=baseline,
             excluded_paths=exclusions,
         )
     except (
         EnvironmentCoverageError,
-        InspectionReceiptError,
+        PresentationReceiptError,
         MonitorError,
         TypeError,
     ) as exc:

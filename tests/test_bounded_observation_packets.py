@@ -53,7 +53,7 @@ def test_packet_presents_exact_binary_bytes_and_receipt(tmp_path):
     assert packet["content_sha256"] == digest(content[:5])
     assert packet["utf8_text"] is None
     assert packet["next_offset"] == 5
-    assert packet["inspection_receipt"]["complete_byte_coverage"] is False
+    assert packet["presentation_receipt"]["complete_byte_presentation"] is False
     assert packet["semantic_understanding_claimed"] is False
     assert packet["accepted"] is False
     assert packet["truth_claimed"] is False
@@ -78,7 +78,7 @@ def test_utf8_preview_is_exact_when_presented_bytes_decode(tmp_path):
         "utf8_text"
     ]
     assert packet["next_offset"] is None
-    assert packet["inspection_receipt"]["complete_byte_coverage"] is True
+    assert packet["presentation_receipt"]["complete_byte_presentation"] is True
 
 
 def test_packet_is_deterministic_and_source_is_unchanged(tmp_path):
@@ -107,7 +107,7 @@ def test_empty_file_produces_complete_empty_observation(tmp_path):
     assert packet["content_sha256"] == digest(b"")
     assert packet["utf8_text"] == ""
     assert packet["next_offset"] is None
-    assert packet["inspection_receipt"]["complete_byte_coverage"] is True
+    assert packet["presentation_receipt"]["complete_byte_presentation"] is True
     assert verify_observation_packet(root, packet) == packet
 
 
@@ -201,7 +201,7 @@ def test_continuation_accumulates_one_complete_receipt(tmp_path):
         root,
         "source.txt",
         max_bytes=4,
-        prior_receipt=first["inspection_receipt"],
+        prior_receipt=first["presentation_receipt"],
     )
 
     assert first["presented_range"] == {"start": 0, "end": 4}
@@ -209,14 +209,14 @@ def test_continuation_accumulates_one_complete_receipt(tmp_path):
     assert second["presented_range"] == {"start": 4, "end": 8}
     assert base64.b64decode(second["content_base64"]) == content[4:]
     assert second["next_offset"] is None
-    assert second["inspection_receipt"]["complete_byte_coverage"] is True
-    assert second["inspection_receipt"]["covered_byte_count"] == len(content)
+    assert second["presentation_receipt"]["complete_byte_presentation"] is True
+    assert second["presentation_receipt"]["presented_byte_count"] == len(content)
 
     monitor = build_monitor_packet(
         root,
-        inspection_receipts=[second["inspection_receipt"]],
+        presentation_receipts=[second["presentation_receipt"]],
     )
-    assert monitor["coverage"]["coverage_complete"] is True
+    assert monitor["coverage"]["byte_presentation_complete"] is True
     assert monitor["next_boundary"] is None
 
 
@@ -236,10 +236,10 @@ def test_explicit_start_can_fill_a_gap_in_prior_receipt(tmp_path):
         "source.txt",
         start=0,
         max_bytes=4,
-        prior_receipt=tail["inspection_receipt"],
+        prior_receipt=tail["presentation_receipt"],
     )
 
-    assert head["inspection_receipt"]["complete_byte_coverage"] is True
+    assert head["presentation_receipt"]["complete_byte_presentation"] is True
     assert head["next_offset"] is None
 
 
@@ -255,7 +255,7 @@ def test_prior_receipt_for_other_path_is_rejected(tmp_path):
             root,
             "b.txt",
             max_bytes=2,
-            prior_receipt=prior["inspection_receipt"],
+            prior_receipt=prior["presentation_receipt"],
         )
 
 
@@ -271,7 +271,7 @@ def test_overlapping_continuation_is_rejected(tmp_path):
             "source.txt",
             start=2,
             max_bytes=4,
-            prior_receipt=prior["inspection_receipt"],
+            prior_receipt=prior["presentation_receipt"],
         )
 
 
@@ -317,7 +317,7 @@ def test_cli_loads_prior_packet_for_continuation(tmp_path, capsys):
     packet = json.loads(capsys.readouterr().out)
     assert result == 0
     assert packet["presented_range"] == {"start": 4, "end": 8}
-    assert packet["inspection_receipt"]["complete_byte_coverage"] is True
+    assert packet["presentation_receipt"]["complete_byte_presentation"] is True
 
 
 def test_cli_reports_bounded_error(tmp_path, capsys):
