@@ -9,6 +9,7 @@ from sim.environment_coverage import (
     compare_environment_receipts,
     observe_environment,
 )
+from sim.inspection_receipts import create_inspection_receipt
 
 
 def digest(data: bytes) -> str:
@@ -27,6 +28,17 @@ def build_environment(root: Path) -> None:
         encoding="utf-8",
     )
     (root / "asset.bin").write_bytes(b"\x00\x01\xff")
+
+
+def inspect_whole_file(root: Path, relative: str) -> dict:
+    size = (root / Path(relative)).stat().st_size
+    ranges = [] if size == 0 else [(0, size)]
+    return create_inspection_receipt(
+        root,
+        relative,
+        method="bounded-byte-review-v1",
+        covered_ranges=ranges,
+    )
 
 
 def test_observation_is_deterministic_and_bounded(tmp_path):
@@ -79,7 +91,10 @@ def test_inspection_is_explicit_and_does_not_follow_from_observation(tmp_path):
 
     receipt = observe_environment(
         root,
-        inspected_paths=["docs/design.md", "src/engine.py"],
+        inspection_receipts=[
+            inspect_whole_file(root, "docs/design.md"),
+            inspect_whole_file(root, "src/engine.py"),
+        ],
     )
     files = {entry["path"]: entry for entry in receipt["files"]}
 
@@ -91,7 +106,7 @@ def test_inspection_is_explicit_and_does_not_follow_from_observation(tmp_path):
     assert receipt["coverage_complete"] is False
 
 
-def test_complete_coverage_requires_every_observed_file_to_be_declared_inspected(
+def test_complete_coverage_requires_a_receipt_for_every_observed_file(
     tmp_path,
 ):
     root = tmp_path / "environment"
@@ -100,10 +115,10 @@ def test_complete_coverage_requires_every_observed_file_to_be_declared_inspected
 
     receipt = observe_environment(
         root,
-        inspected_paths=[
-            "asset.bin",
-            "docs/design.md",
-            "src/engine.py",
+        inspection_receipts=[
+            inspect_whole_file(root, "asset.bin"),
+            inspect_whole_file(root, "docs/design.md"),
+            inspect_whole_file(root, "src/engine.py"),
         ],
     )
 
