@@ -14,14 +14,22 @@ from sim.environment_monitor import (
     MonitorError,
     build_monitor_packet,
 )
+from sim.observation_packets import (
+    ObservationPacketError,
+    build_observation_packet,
+    verify_observation_packet,
+)
 
 __all__ = [
     "EnvironmentCoverageError",
     "InspectionReceiptError",
     "MonitorError",
+    "ObservationPacketError",
+    "build_observation_packet",
     "build_monitor_packet",
     "compare_environment_receipts",
     "create_inspection_receipt",
     "observe_environment",
     "verify_inspection_receipt",
+    "verify_observation_packet",
 ]
